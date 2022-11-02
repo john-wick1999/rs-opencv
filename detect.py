@@ -143,8 +143,11 @@ def run(
                 for *xyxy, conf, cls in reversed(det):
                     if view_img:  # Add bbox to imageq
                         c = int(cls)  # integer class
-                        distance = get_distance(depth[i],xyxy)
-                        label = (f'{names[c]} {conf:.2f}: {distance:.2f} mm')
+                        if source == 'rs':
+                            distance = get_distance(depth[i],xyxy)
+                            label = (f'{names[c]} {conf:.2f}: {distance:.2f} mm')
+                        else:
+                            label = (f'{names[c]} {conf:.2f}')
                         annotator.box_label(xyxy, label, color=colors(c, True), )
                         
 
@@ -167,7 +170,7 @@ def run(
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'data/best.engine', help='model path or triton URL')
-    parser.add_argument('--source', type=str, default=ROOT / '0', help='file/dir/URL/glob/screen/0(webcam)')
+    parser.add_argument('--source', type=str, default=ROOT / 'rs', help='rs for rs camera 1 for usb camera')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco.yaml', help='(optional) dataset.yaml path')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')

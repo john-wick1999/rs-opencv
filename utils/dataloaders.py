@@ -189,7 +189,7 @@ class _RepeatSampler:
 
 class LoadStreams:
     # YOLOv5 streamloader, i.e. `python detect.py --source 'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP streams`
-    def __init__(self, sources='streams.txt', img_size=480, stride=32, auto=True, transforms=None, vid_stride=1, xsize=848, ysize=480, fps = 15):
+    def __init__(self, sources='0', img_size=480, stride=32, auto=True, transforms=None, vid_stride=1, xsize=848, ysize=480, fps = 15):
         torch.backends.cudnn.benchmark = True  # faster for fixed-size inference
         self.mode = 'stream'
         self.img_size = img_size
@@ -204,6 +204,25 @@ class LoadStreams:
             st = f'{i + 1}/{n}: {s}... '
             s = eval(s) if s.isnumeric() else s  # i.e. s = '0' local webcam
             
+            capture = self.get_frame(i, xsize, ysize, fps)
+
+            self.threads[i] = Thread(target=self.update, args=([i, s, capture[0], capture[1]]), daemon=True)
+
+            LOGGER.info(f"{st} Success ({self.frames[i]} frames {self.size[0]}x{self.size[1]} at {self.fps[i]:.2f} FPS)")
+            self.threads[i].start()
+        LOGGER.info('')  # newline
+
+        # check for common shapes
+        s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])
+        self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
+        self.auto = auto and self.rect
+        self.transforms = transforms  # optional
+        if not self.rect:
+            LOGGER.warning('WARNING ⚠️ Stream shapes differ. For optimal performance supply similarly-shaped streams.')
+
+    def get_frame(self, i, xsize, ysize, fps):
+
+        if self.sources[0] == 'rs':
             pipeline = rs.pipeline()
             config = rs.config()
 
@@ -219,45 +238,59 @@ class LoadStreams:
 
             color_image = np.asanyarray(color_frame.get_data())               
 
-            w = int(color_frame.get_width())
-            h = int(color_frame.get_height())
+            self.size = [int(color_frame.get_width()), int(color_frame.get_height())]
 
             self.frames[i] = float('inf')  # infinite stream fallback
             self.fps[i] = max((fps if math.isfinite(fps) else 0) % 100, 0) or 30  # 30 FPS fallback
 
             self.imgs[i] = color_image
             self.depth[i] = depth_frame
-            self.threads[i] = Thread(target=self.update, args=([i, pipeline, s]), daemon=True)
 
-            LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
-            self.threads[i].start()
-        LOGGER.info('')  # newline
+            return pipeline, None
+        else:
+            s = int(self.sources[0])
+            cap = cv2.VideoCapture(s)
+            assert cap.isOpened(), f'{st}Failed to open {s}'
+            self.size = [int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))]
+            fps = cap.get(cv2.CAP_PROP_FPS)  # warning: may return 0 or nan
+            self.frames[i] = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float('inf')  # infinite stream fallback
+            self.fps[i] = max((fps if math.isfinite(fps) else 0) % 100, 0) or 30  # 30 FPS fallback
 
-        # check for common shapes
-        s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])
-        self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
-        self.auto = auto and self.rect
-        self.transforms = transforms  # optional
-        if not self.rect:
-            LOGGER.warning('WARNING ⚠️ Stream shapes differ. For optimal performance supply similarly-shaped streams.')
+            _, self.imgs[i] = cap.read()  # guarantee first frame
+            
+            return None, cap
 
-    def update(self, i, pipeline, stream):
+    def update(self, i, stream, pipeline=None, cap=None):
         # Read stream `i` frames in daemon thread
         n, f = 0, self.frames[i]  # frame number, frame array
-        while n < f:
-            n += 1
-            if n % self.vid_stride == 0:
-                frames = pipeline.wait_for_frames()    
-                depth_frame = frames.get_depth_frame()
-                color_frame = frames.get_color_frame()
+        if self.sources[0] == 'rs':
+            while n < f:
+                n += 1
+                if n % self.vid_stride == 0:
+                    frames = pipeline.wait_for_frames()    
+                    depth_frame = frames.get_depth_frame()
+                    color_frame = frames.get_color_frame()
 
-                if depth_frame and color_frame:
-                    color_image = np.asanyarray(color_frame.get_data())
-                    self.imgs[i] = color_image
-                    self.depth[i] = depth_frame
-                else:
-                    pass
-            time.sleep(0.0)  # wait time
+                    if depth_frame and color_frame:
+                        color_image = np.asanyarray(color_frame.get_data())
+                        self.imgs[i] = color_image
+                        self.depth[i] = depth_frame
+                    else:
+                        pass
+                time.sleep(0.0)  # wait time
+        else:
+            while cap.isOpened() and n < f:
+                n += 1
+                cap.grab()  # .read() = .grab() followed by .retrieve()
+                if n % self.vid_stride == 0:
+                    success, im = cap.retrieve()
+                    if success:
+                        self.imgs[i] = im
+                    else:
+                        LOGGER.warning('WARNING ⚠️ Video stream unresponsive, please check your IP camera connection.')
+                        self.imgs[i] = np.zeros_like(self.imgs[i])
+                        cap.open(stream)  # re-open stream if signal was lost
+                time.sleep(0.0)  # wait time
 
     def __iter__(self):
         self.count = -1
@@ -267,7 +300,8 @@ class LoadStreams:
         self.count += 1
         if not all(x.is_alive() for x in self.threads) or cv2.waitKey(1) == ord('q'):  # q to quit
             cv2.destroyAllWindows()
-            self.pipeline.stop()
+            if self.sources[0] == 'rs':
+                self.pipeline.stop()
             raise StopIteration
 
         im0 = self.imgs.copy()
