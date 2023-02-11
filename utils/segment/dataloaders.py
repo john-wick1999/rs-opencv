@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import DataLoader, distributed
 
 from ..augmentations import augment_hsv, copy_paste, letterbox
-from ..dataloaders0 import InfiniteDataLoader, LoadImagesAndLabels, seed_worker
+from ..dataloaders import InfiniteDataLoader, LoadImagesAndLabels, seed_worker
 from ..general import LOGGER, xyn2xy, xywhn2xyxy, xyxy2xywhn
 from ..torch_utils import torch_distributed_zero_first
 from .augmentations import mixup, random_perspective
@@ -37,7 +37,8 @@ def create_dataloader(path,
                       prefix='',
                       shuffle=False,
                       mask_downsample_ratio=1,
-                      overlap_mask=False):
+                      overlap_mask=False,
+                      seed=0):
     if rect and shuffle:
         LOGGER.warning('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
@@ -64,7 +65,7 @@ def create_dataloader(path,
     sampler = None if rank == -1 else distributed.DistributedSampler(dataset, shuffle=shuffle)
     loader = DataLoader if image_weights else InfiniteDataLoader  # only DataLoader allows for attribute updates
     generator = torch.Generator()
-    generator.manual_seed(6148914691236517205 + RANK)
+    generator.manual_seed(6148914691236517205 + seed + RANK)
     return loader(
         dataset,
         batch_size=batch_size,
@@ -93,12 +94,13 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         single_cls=False,
         stride=32,
         pad=0,
+        min_items=0,
         prefix="",
         downsample_ratio=1,
         overlap=False,
     ):
         super().__init__(path, img_size, batch_size, augment, hyp, rect, image_weights, cache_images, single_cls,
-                         stride, pad, prefix)
+                         stride, pad, min_items, prefix)
         self.downsample_ratio = downsample_ratio
         self.overlap = overlap
 
