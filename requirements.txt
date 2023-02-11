@@ -13,7 +13,7 @@ torch>=1.7.0  # see https://pytorch.org/get-started/locally/ (recommended)
 torchvision>=0.8.1
 tqdm>=4.64.0
 pyrealsense2>=2.51.1.4348
-nvidia-tensorrt>=8.4.3.1
+# nvidia-tensorrt>=8.4.3.1
 # protobuf<=3.20.1  # https://github.com/ultralytics/yolov5/issues/8012
 
 # Logging -------------------------------------

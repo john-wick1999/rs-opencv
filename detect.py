@@ -32,6 +32,7 @@ import argparse
 import os
 import platform
 import sys
+import serial
 from pathlib import Path
 
 import torch
@@ -57,7 +58,7 @@ def get_distance(depth_frame, xyxy):
         x: pixel in x-axis
         y: pixel in y-axis
     '''
-    x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
+    x1, y1, x2, y2 = xyxy
     x = (x2-x1)/2 + x1
     y = (y2-y1)/2 + y1
     dist = depth_frame.get_distance(int(x), int(y))
@@ -166,12 +167,17 @@ def run(
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
+                counter = 0
                 for *xyxy, conf, cls in reversed(det):
+
                     if view_img:  # Add bbox to imageq
                         c = int(cls)  # integer class
                         if source == 'rs':
                             distance = get_distance(depth[i],xyxy)
                             label = (f'{names[c]} {conf:.2f}: {distance:.2f} mm')
+                            if counter < 1:
+                                move(xyxy, names[c], distance)
+                                counter+=1
                         else:
                             label = (f'{names[c]} {conf:.2f}')
                         annotator.box_label(xyxy, label, color=colors(c, True), )
@@ -198,6 +204,17 @@ def run(
     if update:
         strip_optimizer(weights[0])  # update model (to fix SourceChangeWarning)
 
+def move(box, name, distance):
+    x1, y1, x2, y2 = box
+    x = int((x2-x1)/2 + x1)
+
+    if name == 'green cylinder' and distance > 250:
+        if x > 464:
+            print ('right')
+        elif x < 384:
+            print ('left')
+        else:
+            print ('forward')
 
 def parse_opt():
     parser = argparse.ArgumentParser()
@@ -205,7 +222,7 @@ def parse_opt():
     parser.add_argument('--source', type=str, default='0', help='file/dir/URL/glob/screen/0(webcam)')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='(optional) dataset.yaml path')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
-    parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
+    parser.add_argument('--conf-thres', type=float, default=0.75, help='confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
     parser.add_argument('--max-det', type=int, default=1000, help='maximum detections per image')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
