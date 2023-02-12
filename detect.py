@@ -207,14 +207,22 @@ def run(
 def move(box, name, distance):
     x1, y1, x2, y2 = box
     x = int((x2-x1)/2 + x1)
-
+    serialVar = serial.Serial(port="/dev/ttyACM0", baudrate=115200)
+    serialVar.close()
+    serialVar.open()
     if name == 'green cylinder' and distance > 250:
         if x > 464:
+            serialVar.write(b'R') # 82
             print ('right')
         elif x < 384:
-            print ('left')
+            serialVar.write(b'L') #76
+            print ('L')
         else:
+            serialVar.write(b'F') # 70
             print ('forward')
+    else:
+        serialVar.write(b'S')
+    serialVar.close()
 
 def parse_opt():
     parser = argparse.ArgumentParser()
